@@ -1,11 +1,13 @@
 package controllers
 
 import (
+	"fmt"
 	"github.com/HuakunShen/golang-auth/database"
 	"github.com/HuakunShen/golang-auth/models"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
+	"os"
 	"strconv"
 	"time"
 )
@@ -21,9 +23,22 @@ func Register(c *fiber.Ctx) error {
 
 	password, _ := bcrypt.GenerateFromPassword([]byte(data["password"]), 14)
 
-	user := models.User{
-		Name:     data["name"],
-		Email:    data["email"],
+	if len(data["username"]) < 1 || len(data["password"]) < 1 {
+		c.Status(fiber.StatusBadRequest)
+		return c.JSON(fiber.Map{
+			"message": "invalid username or password",
+		})
+	}
+	var user models.User
+	database.DB.Where("username = ?", data["username"]).First(&user)
+	if user.Id != 0 {
+		c.Status(fiber.StatusBadRequest)
+		return c.JSON(fiber.Map{
+			"message": "Username Exists, Try Another One",
+		})
+	}
+	user = models.User{
+		Username: data["username"],
 		Password: password,
 	}
 
@@ -41,7 +56,7 @@ func Login(c *fiber.Ctx) error {
 
 	var user models.User
 
-	database.DB.Where("email = ?", data["email"]).First(&user)
+	database.DB.Where("username = ?", data["username"]).First(&user)
 
 	if user.Id == 0 {
 		c.Status(fiber.StatusNotFound)
@@ -56,10 +71,15 @@ func Login(c *fiber.Ctx) error {
 			"message": "incorrect password",
 		})
 	}
-
+	validTimeMinutes := os.Getenv("JWT_VALID_TIME")
+	validMinutes, err := strconv.ParseInt(validTimeMinutes, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(validMinutes)
 	claims := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.StandardClaims{
 		Issuer:    strconv.Itoa(int(user.Id)),
-		ExpiresAt: time.Now().Add(time.Hour * 24).Unix(), //1 day
+		ExpiresAt: time.Now().Add(time.Hour * time.Duration(validMinutes)).Unix(), //1 day
 	})
 
 	token, err := claims.SignedString([]byte(SecretKey))
